@@ -1,6 +1,14 @@
 # Go Web Server with SQLite Database
 
-This project demonstrates how to create a web server in Go that serves HTTP content generated from a SQLite database.
+This project demonstrates how to create a web server in Go that serves HTTP content generated from a SQLite database, including a Markov chain text generator with streaming page rendering.
+
+## Features
+
+- **SQLite Database Integration**: Store and retrieve posts with automatic timestamps
+- **Markov Chain Text Generation**: Generate stories using trained models
+- **Streaming Page Rendering**: Watch content appear gradually over ~10 seconds
+- **RESTful API**: Create posts and train models via HTTP endpoints
+- **Real-time Content Generation**: Dynamic story generation with related links
 
 ## Prerequisites
 
@@ -9,6 +17,35 @@ Before starting, ensure you have the following installed:
 - **Go** (version 1.19 or later) - [Download here](https://golang.org/dl/)
 - **Git** - [Download here](https://git-scm.com/downloads)
 - **SQLite3** - [Download here](https://www.sqlite.org/download.html)
+
+## API Endpoints
+
+### Posts
+
+- `GET /` - Home page with post creation form
+- `GET /api/posts` - Get all posts
+- `POST /api/posts` - Create a new post
+- `GET /api/posts/{id}` - Get a specific post
+
+### Markov Chain Models
+
+- `POST /api/train` - Train a new model with text data
+- `PUT /api/train/{id}` - Update an existing model with additional text
+
+### Generated Pages
+
+- `GET /post/{id}` - View a generated page (instant load)
+- `GET /post/{id}/stream` - View a generated page with streaming content (~8 seconds with natural jitter)
+
+## Streaming Page Feature
+
+The streaming page feature (`/post/{id}/stream`) provides a unique viewing experience where content appears gradually with natural timing variations:
+
+1. **Title Animation**: Characters appear one by one over ~1.5 seconds with random jitter
+2. **Content Streaming**: Words appear sequentially over ~5 seconds with natural variations
+3. **Links Generation**: Related story links appear one by one over ~1.5 seconds with jitter
+
+Total viewing time is approximately 8 seconds with ±30% jitter on each delay, creating a more natural and engaging "typewriter" effect that feels less mechanical and more human-like.
 
 ## Step-by-Step Instructions
 

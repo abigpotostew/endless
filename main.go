@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -65,7 +66,8 @@ func main() {
 	r.HandleFunc("/api/posts/{id}", app.getPostHandler).Methods("GET")
 	r.HandleFunc("/api/train", app.trainMarkovModelHandler).Methods("POST")
 	r.HandleFunc("/api/train/{id}", app.updateMarkovModelHandler).Methods("PUT")
-	r.HandleFunc("/post/{id}", app.generatePageHandler).Methods("GET")
+	r.HandleFunc("/post/{id}", app.generatePageStreamHandler).Methods("GET")
+	// r.HandleFunc("/post/{id}/stream", app.generatePageStreamHandler).Methods("GET")
 
 	// Start server
 	log.Println("Server starting on :8080")
@@ -577,19 +579,18 @@ func (app *App) generatePageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//get the {id} from the url
+	// Get the {id} from the url
 	vars := mux.Vars(r)
-	// exaple 123-this-is-a-post-title
+	// example 123-this-is-a-post-title
 	idStr := strings.SplitN(vars["id"], "-", 2)[0]
-	//it should support parsing int64
+	// it should support parsing int64
 	seed, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		http.Error(w, "Invalid ID: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// Generate story with "hello world" as seed
-	// seedInt := int64(42)
+	// Generate story with the seed
 	seedInt := seed
 	story, err := train.GeneratePage(seedInt, chain)
 	if err != nil {
@@ -687,4 +688,217 @@ func (app *App) generatePageHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(htmlContent))
+}
+
+func (app *App) generatePageStreamHandler(w http.ResponseWriter, r *http.Request) {
+	// Set headers for streaming
+	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	// Initialize random seed for jitter
+	prng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	// Get the latest model using cache
+	model, err := app.getLatestModel()
+	if err != nil {
+		http.Error(w, "Failed to retrieve model: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Load the model from JSON data
+	chain, err := train.LoadModel([]byte(model.ModelData))
+	if err != nil {
+		http.Error(w, "Failed to load model: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the {id} from the url
+	vars := mux.Vars(r)
+	// example 123-this-is-a-post-title
+	idStr := strings.SplitN(vars["id"], "-", 2)[0]
+	// it should support parsing int64
+	seed, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid ID: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Generate story with the seed
+	seedInt := seed
+	story, err := train.GeneratePage(seedInt, chain)
+	if err != nil {
+		http.Error(w, "Failed to generate page: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Calculate timing to achieve ~10 second total load time
+	totalTargetTime := 8 * time.Second   // Reduced from 10 to 8 seconds
+	titleTime := 2000 * time.Millisecond // 1.5 seconds
+	linksTime := 2000 * time.Millisecond // Increased to 2 seconds for word-by-word streaming
+	contentTime := totalTargetTime - titleTime - linksTime
+
+	// Calculate delays based on content length
+	titleChars := len(story.Link.Title)
+	titleDelay := titleTime / time.Duration(titleChars)
+
+	words := strings.Fields(story.Content)
+	wordDelay := contentTime / time.Duration(len(words))
+
+	// Calculate link timing - we'll stream each word of each link title
+	totalLinkWords := 0
+	for _, link := range story.Links {
+		totalLinkWords += len(strings.Fields(link.Title))
+	}
+	linkWordDelay := linksTime / time.Duration(totalLinkWords)
+
+	// Helper function to add jitter to delays
+	addJitter := func(baseDelay time.Duration) time.Duration {
+		// Add ±30% jitter
+		jitterRange := float64(baseDelay) * 0.3
+		jitter := (prng.Float64()*2 - 1) * jitterRange // Random value between -0.3 and +0.3
+		return baseDelay + time.Duration(jitter)
+	}
+
+	// Send the HTML header and styles first
+	headerHTML := `<!DOCTYPE html>
+<html>
+<head>
+    <title>` + story.Link.Title + `</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .story {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #007cba;
+            margin: 20px 0;
+        }
+        .title {
+            color: #333;
+            font-size: 2em;
+            text-align: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #007cba;
+            padding-bottom: 10px;
+        }
+        .content {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .links-section {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+        }
+        .links-title {
+            color: #333;
+            font-size: 1.5em;
+            margin-bottom: 15px;
+        }
+        .links-list {
+            list-style: none;
+            padding: 0;
+        }
+        .links-list li {
+            margin: 10px 0;
+        }
+        .links-list a {
+            color: #007cba;
+            text-decoration: none;
+            font-size: 16px;
+            padding: 8px 12px;
+            border: 1px solid #007cba;
+            border-radius: 4px;
+            display: inline-block;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .links-list a:hover {
+            background-color: #007cba;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="story">
+        <h1 class="title">`
+
+	w.Write([]byte(headerHTML))
+	w.(http.Flusher).Flush()
+
+	// Stream the title character by character
+	for _, char := range story.Link.Title {
+		w.Write([]byte(string(char)))
+		w.(http.Flusher).Flush()
+		time.Sleep(addJitter(titleDelay))
+	}
+
+	// Send the title closing and content div opening
+	contentStart := `</h1>
+        <div class="content">`
+
+	w.Write([]byte(contentStart))
+	w.(http.Flusher).Flush()
+
+	// Split content into words and stream them
+	for i, word := range words {
+		// Add space before word (except for first word)
+		if i > 0 {
+			w.Write([]byte(" "))
+		}
+		w.Write([]byte(word))
+		w.(http.Flusher).Flush()
+		time.Sleep(addJitter(wordDelay))
+	}
+
+	// Send the content closing and links section opening
+	linksStart := `</div>
+        <div class="links-section">
+            <h2 class="links-title">Related Stories</h2>
+            <ul class="links-list">`
+
+	w.Write([]byte(linksStart))
+	w.(http.Flusher).Flush()
+
+	// Stream links one by one with word-by-word streaming
+	for _, link := range story.Links {
+		// Start the list item and link opening
+		w.Write([]byte(`
+                <li><a href="` + link.Url + `">`))
+		w.(http.Flusher).Flush()
+
+		// Stream the link title word by word
+		linkWords := strings.Fields(link.Title)
+		for i, word := range linkWords {
+			// Add space before word (except for first word)
+			if i > 0 {
+				w.Write([]byte(" "))
+			}
+			w.Write([]byte(word))
+			w.(http.Flusher).Flush()
+			time.Sleep(addJitter(linkWordDelay))
+		}
+
+		// Close the link and list item
+		w.Write([]byte(`</a></li>`))
+		w.(http.Flusher).Flush()
+	}
+
+	// Send the closing HTML
+	footerHTML := `
+            </ul>
+        </div>
+    </div>
+</body>
+</html>`
+
+	w.Write([]byte(footerHTML))
+	w.(http.Flusher).Flush()
 }
