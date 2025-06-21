@@ -20,7 +20,7 @@ echo "This will take about 8 seconds to complete with natural jitter..."
 echo ""
 
 # Use curl to test the streaming endpoint
-curl -N "http://localhost:8080/post/42/stream"
+curl -N "http://localhost:8080/post/42-abc"
 
 echo ""
 echo ""
@@ -36,5 +36,5 @@ echo "Server stopped."
 echo ""
 echo "To test manually:"
 echo "1. Start the server: ./endless"
-echo "2. Visit: http://localhost:8080/post/42/stream"
+echo "2. Visit: http://localhost:8080/post/42-abc"
 echo "3. Watch the content appear gradually over ~8 seconds with natural jitter" 
