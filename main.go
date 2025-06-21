@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	_ "net/http/pprof"
 	"strconv"
 	"strings"
 	"time"
@@ -15,18 +16,8 @@ import (
 	"endless/train"
 
 	"github.com/gorilla/mux"
+	"github.com/pkg/profile"
 )
-
-type CreatePostRequest struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-}
-
-type CreatePostResponse struct {
-	Success bool        `json:"success"`
-	Error   string      `json:"error,omitempty"`
-	Post    *store.Post `json:"post,omitempty"`
-}
 
 type CreateMarkovModelRequest struct {
 	Success bool                    `json:"success"`
@@ -40,8 +31,10 @@ type App struct {
 }
 
 func main() {
+	defer profile.Start(profile.MemProfile).Stop()
+
 	// Initialize database store
-	postStore, err := store.NewSQLiteStore("./posts.db")
+	postStore, err := store.NewSQLiteStore("./endless.db")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -65,99 +58,18 @@ func main() {
 	r.HandleFunc("/api/train/{id}", app.updateMarkovModelHandler).Methods("PUT").Host("localhost")
 	r.HandleFunc("/post/{id}", app.generatePageStreamHandler).Methods("GET").Host("localhost")
 
+	// Start pprof server on a separate port (optional but recommended)
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+
 	// Start server
 	log.Println("Server starting on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))
 }
 
 func (app *App) homeHandler(w http.ResponseWriter, r *http.Request) {
-	// Set headers for streaming
-	w.Header().Set("Content-Type", "text/html")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	// Send the HTML header and styles first
-	headerHTML := `<!DOCTYPE html>
-<html>
-  <head>
-    <title>Go SQLite Web Server</title>
-    <style>
-      body { font-family: Arial, sans-serif; margin: 40px; }
-      .post { border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px; }
-      .title { color: #333; font-size: 1.2em; }
-      .content { color: #666; margin-top: 10px; }
-      .date { color: #999; font-size: 0.8em; }
-      .form { margin: 20px 0; padding: 20px; border: 1px solid #ccc; border-radius: 5px; }
-      .form input, .form textarea { width: 100%; margin: 5px 0; padding: 8px; }
-      .form button { background: #007cba; color: white; padding: 10px 20px; border: none; border-radius: 3px; cursor: pointer; }
-    </style>
-  </head>
-  <body>
-    <h1>Posts from SQLite Database</h1>
-    <div class="form">
-      <h3>Add New Post</h3>
-      <input type="text" id="title" placeholder="Post Title" />
-      <textarea id="content" placeholder="Post Content" rows="4"></textarea>
-      <button onclick="addPost()">Add Post</button>
-    </div>
-    <div id="posts">`
-
-	w.Write([]byte(headerHTML))
-	w.(http.Flusher).Flush()
-
-	// Stream posts from database
-	posts, err := app.store.GetAllPosts()
-	if err != nil {
-		w.Write([]byte("<p>Error loading posts: " + err.Error() + "</p>"))
-		return
-	}
-
-	for _, post := range posts {
-		// Stream each post as it's read
-		postHTML := fmt.Sprintf(`
-			<div class="post">
-				<div class="title">%s</div>
-				<div class="content">%s</div>
-				<div class="date">%s</div>
-			</div>`, post.Title, post.Content, post.CreatedAt)
-
-		w.Write([]byte(postHTML))
-		w.(http.Flusher).Flush()
-	}
-
-	// Send the closing HTML and JavaScript
-	footerHTML := `
-    </div>
-    <script>
-      function addPost() {
-        var title = document.getElementById("title").value;
-        var content = document.getElementById("content").value;
-        if (!title || !content) {
-          alert("Please fill in both title and content");
-          return;
-        }
-        fetch("/api/posts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: title, content: content }),
-        })
-        .then((response) => response.json())
-        .then((data) => {
-          if (data.success) {
-            document.getElementById("title").value = "";
-            document.getElementById("content").value = "";
-            location.reload();
-          } else {
-            alert("Error: " + data.error);
-          }
-        })
-        .catch((error) => alert("Error: " + error));
-      }
-    </script>
-  </body>
-</html>`
-
-	w.Write([]byte(footerHTML))
+	streamPage(w, r, 0, app)
 }
 
 // getLatestModel returns the latest model, using cache if available
@@ -168,7 +80,7 @@ func (app *App) getLatestModel() (*store.MarkovChainModel, error) {
 	}
 
 	// Get the first available model from the database
-	models, err := app.store.GetAllMarkovChainModels()
+	models, err := app.store.GetAllMarkovChainModels(1)
 	if err != nil {
 		return nil, err
 	}
@@ -394,6 +306,20 @@ func (app *App) updateMarkovModelHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (app *App) generatePageStreamHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the {id} from the url
+	vars := mux.Vars(r)
+	// example 123-this-is-a-post-title
+	idStr := strings.SplitN(vars["id"], "-", 2)[0]
+	// it should support parsing int64
+	seed, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid ID: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	streamPage(w, r, seed, app)
+}
+
+func streamPage(w http.ResponseWriter, r *http.Request, seedInput int64, app *App) {
 	// Set headers for streaming
 	w.Header().Set("Content-Type", "text/html")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -416,20 +342,8 @@ func (app *App) generatePageStreamHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get the {id} from the url
-	vars := mux.Vars(r)
-	// example 123-this-is-a-post-title
-	idStr := strings.SplitN(vars["id"], "-", 2)[0]
-	// it should support parsing int64
-	seed, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid ID: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
 	// Generate story with the seed
-	seedInt := seed
-	story, err := train.GeneratePage(seedInt, chain)
+	story, err := train.GeneratePage(seedInput, chain)
 	if err != nil {
 		http.Error(w, "Failed to generate page: "+err.Error(), http.StatusInternalServerError)
 		return

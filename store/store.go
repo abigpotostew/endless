@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"os"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -24,15 +23,11 @@ type MarkovChainModel struct {
 
 // PostStore defines the interface for post storage operations
 type PostStore interface {
-	// Post operations
-	SavePost(title, content string) (*Post, error)
-	GetPost(id int) (*Post, error)
-	GetAllPosts() ([]Post, error)
 
 	// Markov Chain Model operations
 	SaveMarkovChainModel(modelData []byte) (*MarkovChainModel, error)
 	GetMarkovChainModel(id int) (*MarkovChainModel, error)
-	GetAllMarkovChainModels() ([]MarkovChainModel, error)
+	GetAllMarkovChainModels(limit int) ([]MarkovChainModel, error)
 	UpdateMarkovChainModel(id int, modelData []byte) (*MarkovChainModel, error)
 
 	// Database lifecycle
@@ -65,73 +60,15 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 
 // initDB initializes the database with the schema
 func (s *SQLiteStore) initDB() error {
-	schema, err := os.ReadFile("data/schema.sql")
-	if err != nil {
-		return err
-	}
+	schema := `CREATE TABLE IF NOT EXISTS markov_chain_model (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_data TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`
 
-	_, err = s.db.Exec(string(schema))
+	_, err := s.db.Exec(string(schema))
 	return err
-}
-
-// SavePost creates a new post in the database
-func (s *SQLiteStore) SavePost(title, content string) (*Post, error) {
-	result, err := s.db.Exec("INSERT INTO post (title, content) VALUES (?, ?)", title, content)
-	if err != nil {
-		return nil, err
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-
-	// Get the created post
-	var post Post
-	err = s.db.QueryRow("SELECT id, title, content, created_at FROM post WHERE id = ?", id).
-		Scan(&post.ID, &post.Title, &post.Content, &post.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-
-	return &post, nil
-}
-
-// GetPost retrieves a single post by ID
-func (s *SQLiteStore) GetPost(id int) (*Post, error) {
-	var post Post
-	err := s.db.QueryRow("SELECT id, title, content, created_at FROM post WHERE id = ?", id).
-		Scan(&post.ID, &post.Title, &post.Content, &post.CreatedAt)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, err
-		}
-		return nil, err
-	}
-
-	return &post, nil
-}
-
-// GetAllPosts retrieves all posts ordered by creation date (newest first)
-func (s *SQLiteStore) GetAllPosts() ([]Post, error) {
-	rows, err := s.db.Query("SELECT id, title, content, created_at FROM post ORDER BY created_at DESC")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var posts []Post
-	for rows.Next() {
-		var post Post
-		err := rows.Scan(&post.ID, &post.Title, &post.Content, &post.CreatedAt)
-		if err != nil {
-			return nil, err
-		}
-		posts = append(posts, post)
-	}
-
-	return posts, nil
 }
 
 // Close closes the database connection
@@ -184,8 +121,8 @@ func (s *SQLiteStore) GetMarkovChainModel(id int) (*MarkovChainModel, error) {
 }
 
 // GetAllMarkovChainModels retrieves all markov chain models ordered by creation date (newest first)
-func (s *SQLiteStore) GetAllMarkovChainModels() ([]MarkovChainModel, error) {
-	rows, err := s.db.Query("SELECT id, model_data, created_at FROM markov_chain_model ORDER BY created_at DESC")
+func (s *SQLiteStore) GetAllMarkovChainModels(limit int) ([]MarkovChainModel, error) {
+	rows, err := s.db.Query("SELECT id, model_data, created_at FROM markov_chain_model ORDER BY created_at DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, err
 	}
