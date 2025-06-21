@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Go SQLite Web Server</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 40px;
+      }
+      .post {
+        border: 1px solid #ddd;
+        margin: 10px 0;
+        padding: 15px;
+        border-radius: 5px;
+      }
+      .title {
+        color: #333;
+        font-size: 1.2em;
+      }
+      .content {
+        color: #666;
+        margin-top: 10px;
+      }
+      .date {
+        color: #999;
+        font-size: 0.8em;
+      }
+      .form {
+        margin: 20px 0;
+        padding: 20px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+      }
+      .form input,
+      .form textarea {
+        width: 100%;
+        margin: 5px 0;
+        padding: 8px;
+      }
+      .form button {
+        background: #007cba;
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Posts from SQLite Database</h1>
+
+    <div class="form">
+      <h3>Add New Post</h3>
+      <input type="text" id="title" placeholder="Post Title" />
+      <textarea id="content" placeholder="Post Content" rows="4"></textarea>
+      <button onclick="addPost()">Add Post</button>
+    </div>
+
+    <div id="posts"></div>
+
+    <script>
+      // Load posts on page load
+      loadPosts();
+
+      function loadPosts() {
+        fetch("/api/posts")
+          .then((response) => response.json())
+          .then((posts) => {
+            var postsDiv = document.getElementById("posts");
+            postsDiv.innerHTML = "";
+            posts.forEach(function (post) {
+              postsDiv.innerHTML +=
+                '<div class="post">' +
+                '<div class="title">' +
+                post.title +
+                "</div>" +
+                '<div class="content">' +
+                post.content +
+                "</div>" +
+                '<div class="date">' +
+                post.created_at +
+                "</div>" +
+                "</div>";
+            });
+          });
+      }
+
+      function addPost() {
+        var title = document.getElementById("title").value;
+        var content = document.getElementById("content").value;
+
+        if (!title || !content) {
+          alert("Please fill in both title and content");
+          return;
+        }
+
+        fetch("/api/posts", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            title: title,
+            content: content,
+          }),
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.success) {
+              document.getElementById("title").value = "";
+              document.getElementById("content").value = "";
+              loadPosts(); // Reload posts
+            } else {
+              alert("Error: " + data.error);
+            }
+          })
+          .catch((error) => {
+            alert("Error: " + error);
+          });
+      }
+    </script>
+  </body>
+</html>
