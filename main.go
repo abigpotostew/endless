@@ -1,24 +1,20 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
-	"os"
+	"strconv"
+	"strings"
 	"time"
 
-	"github.com/gorilla/mux"
-	_ "github.com/mattn/go-sqlite3"
-)
+	"endless/store"
+	"endless/train"
 
-type Post struct {
-	ID        int    `json:"id"`
-	Title     string `json:"title"`
-	Content   string `json:"content"`
-	CreatedAt string `json:"created_at"`
-}
+	"github.com/gorilla/mux"
+)
 
 type CreatePostRequest struct {
 	Title   string `json:"title"`
@@ -26,60 +22,53 @@ type CreatePostRequest struct {
 }
 
 type CreatePostResponse struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
-	Post    *Post  `json:"post,omitempty"`
+	Success bool        `json:"success"`
+	Error   string      `json:"error,omitempty"`
+	Post    *store.Post `json:"post,omitempty"`
+}
+
+type CreateMarkovModelRequest struct {
+	Success bool                    `json:"success"`
+	Error   string                  `json:"error,omitempty"`
+	Model   *store.MarkovChainModel `json:"model,omitempty"`
 }
 
 type App struct {
-	db *sql.DB
+	store store.PostStore
 }
 
 func main() {
-	// Initialize database
-	db, err := sql.Open("sqlite3", "./posts.db")
+	// Initialize database store
+	postStore, err := store.NewSQLiteStore("./posts.db")
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+	defer postStore.Close()
 
 	// Test database connection
-	err = db.Ping()
+	err = postStore.Ping()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	app := &App{db: db}
-
-	// Initialize database with schema
-	err = app.initDB()
-	if err != nil {
-		log.Fatal(err)
-	}
+	app := &App{store: postStore}
 
 	// Setup router
 	r := mux.NewRouter()
 
 	// Serve static files
 	r.HandleFunc("/", app.homeHandler).Methods("GET")
-	r.HandleFunc("/slow", app.slowHomeHandler).Methods("GET")
+	// r.HandleFunc("/slow", app.slowHomeHandler).Methods("GET")
 	r.HandleFunc("/api/posts", app.getPostsHandler).Methods("GET")
 	r.HandleFunc("/api/posts", app.createPostHandler).Methods("POST")
 	r.HandleFunc("/api/posts/{id}", app.getPostHandler).Methods("GET")
+	r.HandleFunc("/api/train", app.trainMarkovModelHandler).Methods("POST")
+	r.HandleFunc("/api/train/{id}", app.updateMarkovModelHandler).Methods("PUT")
+	r.HandleFunc("/post/{id}", app.generatePageHandler).Methods("GET")
 
 	// Start server
 	log.Println("Server starting on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))
-}
-
-func (app *App) initDB() error {
-	schema, err := os.ReadFile("data/schema.sql")
-	if err != nil {
-		return err
-	}
-
-	_, err = app.db.Exec(string(schema))
-	return err
 }
 
 func (app *App) homeHandler(w http.ResponseWriter, r *http.Request) {
@@ -118,20 +107,13 @@ func (app *App) homeHandler(w http.ResponseWriter, r *http.Request) {
 	w.(http.Flusher).Flush()
 
 	// Stream posts from database
-	rows, err := app.db.Query("SELECT id, title, content, created_at FROM posts ORDER BY created_at DESC")
+	posts, err := app.store.GetAllPosts()
 	if err != nil {
 		w.Write([]byte("<p>Error loading posts: " + err.Error() + "</p>"))
 		return
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var post Post
-		err := rows.Scan(&post.ID, &post.Title, &post.Content, &post.CreatedAt)
-		if err != nil {
-			continue
-		}
-
+	for _, post := range posts {
 		// Stream each post as it's read
 		postHTML := fmt.Sprintf(`
 			<div class="post">
@@ -215,20 +197,13 @@ func (app *App) slowHomeHandler(w http.ResponseWriter, r *http.Request) {
 	w.(http.Flusher).Flush()
 
 	// Stream posts from database
-	rows, err := app.db.Query("SELECT id, title, content, created_at FROM posts ORDER BY created_at DESC")
+	posts, err := app.store.GetAllPosts()
 	if err != nil {
 		w.Write([]byte("<p>Error loading posts: " + err.Error() + "</p>"))
 		return
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var post Post
-		err := rows.Scan(&post.ID, &post.Title, &post.Content, &post.CreatedAt)
-		if err != nil {
-			continue
-		}
-
+	for _, post := range posts {
 		// Stream each post as it's read
 		postHTML := fmt.Sprintf(`
 			<div class="post">
@@ -278,22 +253,10 @@ func (app *App) slowHomeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *App) getPostsHandler(w http.ResponseWriter, r *http.Request) {
-	rows, err := app.db.Query("SELECT id, title, content, created_at FROM posts ORDER BY created_at DESC")
+	posts, err := app.store.GetAllPosts()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-	defer rows.Close()
-
-	var posts []Post
-	for rows.Next() {
-		var post Post
-		err := rows.Scan(&post.ID, &post.Title, &post.Content, &post.CreatedAt)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		posts = append(posts, post)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -324,7 +287,7 @@ func (app *App) createPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := app.db.Exec("INSERT INTO posts (title, content) VALUES (?, ?)", req.Title, req.Content)
+	post, err := app.store.SavePost(req.Title, req.Content)
 	if err != nil {
 		response := CreatePostResponse{
 			Success: false,
@@ -336,36 +299,9 @@ func (app *App) createPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		response := CreatePostResponse{
-			Success: false,
-			Error:   "Failed to get inserted ID",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	// Get the created post
-	var post Post
-	err = app.db.QueryRow("SELECT id, title, content, created_at FROM posts WHERE id = ?", id).
-		Scan(&post.ID, &post.Title, &post.Content, &post.CreatedAt)
-	if err != nil {
-		response := CreatePostResponse{
-			Success: false,
-			Error:   "Failed to retrieve created post",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
 	response := CreatePostResponse{
 		Success: true,
-		Post:    &post,
+		Post:    post,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -374,21 +310,355 @@ func (app *App) createPostHandler(w http.ResponseWriter, r *http.Request) {
 
 func (app *App) getPostHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id := vars["id"]
+	idStr := vars["id"]
 
-	var post Post
-	err := app.db.QueryRow("SELECT id, title, content, created_at FROM posts WHERE id = ?", id).
-		Scan(&post.ID, &post.Title, &post.Content, &post.CreatedAt)
-
+	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			http.Error(w, "Post not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Invalid post ID", http.StatusBadRequest)
+		return
+	}
+
+	post, err := app.store.GetPost(id)
+	if err != nil {
+		http.Error(w, "Post not found", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(post)
+}
+
+func (app *App) trainMarkovModelHandler(w http.ResponseWriter, r *http.Request) {
+	// Read the plain text body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Failed to read request body: " + err.Error(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+	defer r.Body.Close()
+
+	// Check if body is empty
+	if len(body) == 0 {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Request body cannot be empty",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Convert body to string for processing
+	inputText := string(body)
+
+	// Build the markov chain model
+	chain, err := train.BuildModel(inputText)
+	if err != nil {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Failed to build model: " + err.Error(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Serialize the model to JSON
+	modelData, err := train.SerializeModel(chain)
+	if err != nil {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Failed to serialize model: " + err.Error(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Save the model to the database
+	model, err := app.store.SaveMarkovChainModel(modelData)
+	if err != nil {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Failed to save model to database: " + err.Error(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Return success response
+	response := CreateMarkovModelRequest{
+		Success: true,
+		Model:   model,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(response)
+}
+
+func (app *App) updateMarkovModelHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the model ID from the URL
+	vars := mux.Vars(r)
+	idStr := vars["id"]
+
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Invalid model ID: " + err.Error(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Read the plain text body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Failed to read request body: " + err.Error(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+	defer r.Body.Close()
+
+	// Check if body is empty
+	if len(body) == 0 {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Request body cannot be empty",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Convert body to string for processing
+	additionalText := string(body)
+
+	// Get the existing model from the database
+	existingModel, err := app.store.GetMarkovChainModel(id)
+	if err != nil {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Failed to retrieve model: " + err.Error(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Load the existing model from JSON data
+	chain, err := train.LoadModel([]byte(existingModel.ModelData))
+	if err != nil {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Failed to load existing model: " + err.Error(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Add the additional text to the existing model
+	err = train.AddTextToModel(chain, additionalText)
+	if err != nil {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Failed to add text to model: " + err.Error(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Serialize the updated model to JSON
+	modelData, err := train.SerializeModel(chain)
+	if err != nil {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Failed to serialize updated model: " + err.Error(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Update the model in the database
+	updatedModel, err := app.store.UpdateMarkovChainModel(id, modelData)
+	if err != nil {
+		response := CreateMarkovModelRequest{
+			Success: false,
+			Error:   "Failed to update model in database: " + err.Error(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Return success response
+	response := CreateMarkovModelRequest{
+		Success: true,
+		Model:   updatedModel,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+func (app *App) generatePageHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the first available model from the database
+	models, err := app.store.GetAllMarkovChainModels()
+	if err != nil {
+		http.Error(w, "Failed to retrieve models: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(models) == 0 {
+		http.Error(w, "No models found in database", http.StatusNotFound)
+		return
+	}
+
+	// Use the first (most recent) model
+	model := models[0]
+
+	// Load the model from JSON data
+	chain, err := train.LoadModel([]byte(model.ModelData))
+	if err != nil {
+		http.Error(w, "Failed to load model: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	//get the {id} from the url
+	vars := mux.Vars(r)
+	// exaple 123-this-is-a-post-title
+	idStr := strings.SplitN(vars["id"], "-", 2)[0]
+	//it should support parsing int64
+	seed, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid ID: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Generate story with "hello world" as seed
+	// seedInt := int64(42)
+	seedInt := seed
+	story, err := train.GeneratePage(seedInt, chain)
+	if err != nil {
+		http.Error(w, "Failed to generate page: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Create basic HTML page
+	htmlContent := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>%s</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .story {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #007cba;
+            margin: 20px 0;
+        }
+        .title {
+            color: #333;
+            font-size: 2em;
+            text-align: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #007cba;
+            padding-bottom: 10px;
+        }
+        .content {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .links-section {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+        }
+        .links-title {
+            color: #333;
+            font-size: 1.5em;
+            margin-bottom: 15px;
+        }
+        .links-list {
+            list-style: none;
+            padding: 0;
+        }
+        .links-list li {
+            margin: 10px 0;
+        }
+        .links-list a {
+            color: #007cba;
+            text-decoration: none;
+            font-size: 16px;
+            padding: 8px 12px;
+            border: 1px solid #007cba;
+            border-radius: 4px;
+            display: inline-block;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .links-list a:hover {
+            background-color: #007cba;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="story">
+        <h1 class="title">%s</h1>
+        <div class="content">%s</div>
+        <div class="links-section">
+            <h2 class="links-title">Related Stories</h2>
+            <ul class="links-list">`, story.Link.Title, story.Link.Title, story.Content)
+
+	// Add links to the HTML
+	for _, link := range story.Links {
+		htmlContent += fmt.Sprintf(`
+                <li><a href="%s">%s</a></li>`, link.Url, link.Title)
+	}
+
+	// Close the HTML
+	htmlContent += `
+            </ul>
+        </div>
+    </div>
+</body>
+</html>`
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(htmlContent))
 }

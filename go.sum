@@ -2,3 +2,5 @@ github.com/gorilla/mux v1.8.1 h1:TuBL49tXwgrFYWhqrNgrUNEY92u81SPhu7sTdzQEiWY=
 github.com/gorilla/mux v1.8.1/go.mod h1:AKf9I4AEqPTmMytcMc0KkNouC66V3BtZ4qD5fmWSiMQ=
 github.com/mattn/go-sqlite3 v1.14.28 h1:ThEiQrnbtumT+QMknw63Befp/ce/nUPgBPMlRFEum7A=
 github.com/mattn/go-sqlite3 v1.14.28/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
+github.com/mb-14/gomarkov v0.0.0-20231120193207-9cbdc8df67a8 h1:4Z2WmWiMrfaZZYbuw5vx1yv1jfgtf5fuRgSUSxhTy5A=
+github.com/mb-14/gomarkov v0.0.0-20231120193207-9cbdc8df67a8/go.mod h1:6nnTLIXjtAZzRGji0HC3vH+rGM2rKdAkIKgizGlRF6g=
