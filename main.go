@@ -34,7 +34,8 @@ type CreateMarkovModelRequest struct {
 }
 
 type App struct {
-	store store.PostStore
+	store       store.PostStore
+	cachedModel *store.MarkovChainModel
 }
 
 func main() {
@@ -328,6 +329,33 @@ func (app *App) getPostHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(post)
 }
 
+// getLatestModel returns the latest model, using cache if available
+func (app *App) getLatestModel() (*store.MarkovChainModel, error) {
+	// Return cached model if available
+	if app.cachedModel != nil {
+		return app.cachedModel, nil
+	}
+
+	// Get the first available model from the database
+	models, err := app.store.GetAllMarkovChainModels()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(models) == 0 {
+		return nil, fmt.Errorf("no models found in database")
+	}
+
+	// Cache the first (most recent) model
+	app.cachedModel = &models[0]
+	return app.cachedModel, nil
+}
+
+// clearModelCache clears the cached model
+func (app *App) clearModelCache() {
+	app.cachedModel = nil
+}
+
 func (app *App) trainMarkovModelHandler(w http.ResponseWriter, r *http.Request) {
 	// Read the plain text body
 	body, err := io.ReadAll(r.Body)
@@ -396,6 +424,9 @@ func (app *App) trainMarkovModelHandler(w http.ResponseWriter, r *http.Request) 
 		json.NewEncoder(w).Encode(response)
 		return
 	}
+
+	// Clear the cache since we have a new model
+	app.clearModelCache()
 
 	// Return success response
 	response := CreateMarkovModelRequest{
@@ -518,6 +549,9 @@ func (app *App) updateMarkovModelHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Clear the cache since the model was updated
+	app.clearModelCache()
+
 	// Return success response
 	response := CreateMarkovModelRequest{
 		Success: true,
@@ -529,20 +563,12 @@ func (app *App) updateMarkovModelHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (app *App) generatePageHandler(w http.ResponseWriter, r *http.Request) {
-	// Get the first available model from the database
-	models, err := app.store.GetAllMarkovChainModels()
+	// Get the latest model using cache
+	model, err := app.getLatestModel()
 	if err != nil {
-		http.Error(w, "Failed to retrieve models: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to retrieve model: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	if len(models) == 0 {
-		http.Error(w, "No models found in database", http.StatusNotFound)
-		return
-	}
-
-	// Use the first (most recent) model
-	model := models[0]
 
 	// Load the model from JSON data
 	chain, err := train.LoadModel([]byte(model.ModelData))
