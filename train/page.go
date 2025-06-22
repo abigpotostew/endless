@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	"github.com/mb-14/gomarkov"
 )
 
 type GeneratedPage struct {
@@ -19,7 +17,7 @@ type GeneratedPage struct {
 	Author      string
 }
 
-func GeneratePage(seed int64, chain *gomarkov.Chain) (GeneratedPage, error) {
+func GeneratePage(seed int64, chain MarkovChain) (GeneratedPage, error) {
 	prng := rand.New(rand.NewSource(seed))
 	thisLink, err := createLinkFromSeed(seed, prng, chain)
 	if err != nil {
@@ -46,7 +44,7 @@ func GeneratePage(seed int64, chain *gomarkov.Chain) (GeneratedPage, error) {
 	return page, nil
 }
 
-func createParagraph(prng *rand.Rand, chain *gomarkov.Chain) (string, error) {
+func createParagraph(prng *rand.Rand, chain MarkovChain) (string, error) {
 	sentenceCount := prng.Intn(10) + 1
 	var paragraph strings.Builder
 	for i := 0; i < sentenceCount; i++ {
@@ -62,13 +60,13 @@ func createParagraph(prng *rand.Rand, chain *gomarkov.Chain) (string, error) {
 	return paragraph.String(), nil
 }
 
-func createNewLink(prngOld *rand.Rand, chain *gomarkov.Chain) (PageLink, error) {
+func createNewLink(prngOld *rand.Rand, chain MarkovChain) (PageLink, error) {
 	seed := prngOld.Int63()
 	prng := rand.New(rand.NewSource(seed))
 	return createLinkFromSeed(seed, prng, chain)
 }
 
-func createLinkFromSeed(seed int64, prng *rand.Rand, chain *gomarkov.Chain) (PageLink, error) {
+func createLinkFromSeed(seed int64, prng *rand.Rand, chain MarkovChain) (PageLink, error) {
 	title, err := GenerateStoryFromPrng(prng, chain)
 	if err != nil {
 		return PageLink{}, err
@@ -107,7 +105,7 @@ type PageLink struct {
 	Seed  int64
 }
 
-func createLinks(prng *rand.Rand, chain *gomarkov.Chain) ([]PageLink, error) {
+func createLinks(prng *rand.Rand, chain MarkovChain) ([]PageLink, error) {
 	linkCount := prng.Intn(3) + 1
 	links := []PageLink{}
 	for i := 0; i < linkCount; i++ {
@@ -147,7 +145,7 @@ var authors = []string{
 }
 
 // GenerateHomePagePosts generates multiple posts for the home page grid
-func GenerateHomePagePosts(chain *gomarkov.Chain, count int) ([]GeneratedPage, error) {
+func GenerateHomePagePosts(chain MarkovChain, count int) ([]GeneratedPage, error) {
 	// Use current time as base seed for consistent daily generation
 	baseSeed := time.Now().Unix() / 86400 // Daily seed (changes every day)
 
