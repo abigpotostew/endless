@@ -57,13 +57,13 @@ func main() {
 
 	// Serve static files
 	r.HandleFunc("/", app.homeHandler).Methods("GET")
-	// need to restrict these to only allow requests from localhost
-	r.HandleFunc("/api/train", app.trainMarkovModelHandler).Methods("POST").Host("localhost")
-	r.HandleFunc("/api/train/{id}", app.updateMarkovModelHandler).Methods("PUT").Host("localhost")
-	r.HandleFunc("/post/{id}", app.generatePageStreamHandler).Methods("GET").Host("localhost")
-	r.HandleFunc("/health", app.healthHandler).Methods("GET").Host("localhost")
 	r.HandleFunc("/sitemap.xml", app.sitemapHandler).Methods("GET")
 	r.HandleFunc("/robots.txt", app.robotsHandler).Methods("GET")
+	r.HandleFunc("/post/{id}", app.generatePageStreamHandler).Methods("GET")
+	// need to restrict these to only allow requests from localhost
+	r.HandleFunc("/health", app.healthHandler).Methods("GET").Host("localhost")
+	r.HandleFunc("/api/train", app.trainMarkovModelHandler).Methods("POST").Host("localhost")
+	r.HandleFunc("/api/train/{id}", app.updateMarkovModelHandler).Methods("PUT").Host("localhost")
 
 	// Start server
 	//accept port from env
