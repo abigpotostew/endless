@@ -2,13 +2,13 @@
 FROM golang:1.23.4-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git gcc musl-dev sqlite-dev
+RUN apk add --no-cache gcc musl-dev sqlite-dev
 
 # Set working directory
 WORKDIR /app
 
-# Download source from main branch
-RUN git clone https://github.com/abigpotostew/endless.git .
+# Copy source from host
+COPY . .
 
 # Download Go dependencies
 RUN go mod download
