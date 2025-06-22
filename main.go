@@ -8,12 +8,13 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"endless/store"
-	"endless/train"
+	"github.com/abigpotostew/endless/store"
+	"github.com/abigpotostew/endless/train"
 
 	"github.com/gorilla/mux"
 )
@@ -31,8 +32,13 @@ type App struct {
 
 func main() {
 
+	sqliteDbPath := os.Getenv("SQLITE_DB_DIR")
+	if sqliteDbPath == "" {
+		sqliteDbPath = "."
+	}
+	sqliteDbPath = filepath.Join(sqliteDbPath, "endless.db")
 	// Initialize database store
-	postStore, err := store.NewSQLiteStore("./endless.db")
+	postStore, err := store.NewSQLiteStore(sqliteDbPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -55,6 +61,7 @@ func main() {
 	r.HandleFunc("/api/train", app.trainMarkovModelHandler).Methods("POST").Host("localhost")
 	r.HandleFunc("/api/train/{id}", app.updateMarkovModelHandler).Methods("PUT").Host("localhost")
 	r.HandleFunc("/post/{id}", app.generatePageStreamHandler).Methods("GET").Host("localhost")
+	r.HandleFunc("/health", app.healthHandler).Methods("GET").Host("localhost")
 
 	// Start server
 	//accept port from env
@@ -532,4 +539,9 @@ func streamPage(w http.ResponseWriter, seedInput int64, app *App) {
 
 	w.Write([]byte(footerHTML))
 	w.(http.Flusher).Flush()
+}
+
+func (app *App) healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
 }

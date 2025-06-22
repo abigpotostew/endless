@@ -1,4 +1,4 @@
-module endless
+module github.com/abigpotostew/endless
 
 go 1.23.4
 
