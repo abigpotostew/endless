@@ -7,7 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
-	_ "net/http/pprof"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +16,6 @@ import (
 	"endless/train"
 
 	"github.com/gorilla/mux"
-	"github.com/pkg/profile"
 )
 
 type CreateMarkovModelRequest struct {
@@ -31,7 +30,6 @@ type App struct {
 }
 
 func main() {
-	defer profile.Start(profile.MemProfile).Stop()
 
 	// Initialize database store
 	postStore, err := store.NewSQLiteStore("./endless.db")
@@ -58,18 +56,18 @@ func main() {
 	r.HandleFunc("/api/train/{id}", app.updateMarkovModelHandler).Methods("PUT").Host("localhost")
 	r.HandleFunc("/post/{id}", app.generatePageStreamHandler).Methods("GET").Host("localhost")
 
-	// Start pprof server on a separate port (optional but recommended)
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
-
 	// Start server
-	log.Println("Server starting on :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	//accept port from env
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	log.Println("Server starting on :" + port)
+	log.Fatal(http.ListenAndServe(":"+port, r))
 }
 
 func (app *App) homeHandler(w http.ResponseWriter, r *http.Request) {
-	streamPage(w, r, 0, app)
+	streamPage(w, 0, app)
 }
 
 // getLatestModel returns the latest model, using cache if available
@@ -316,10 +314,10 @@ func (app *App) generatePageStreamHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Invalid ID: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	streamPage(w, r, seed, app)
+	streamPage(w, seed, app)
 }
 
-func streamPage(w http.ResponseWriter, r *http.Request, seedInput int64, app *App) {
+func streamPage(w http.ResponseWriter, seedInput int64, app *App) {
 	// Set headers for streaming
 	w.Header().Set("Content-Type", "text/html")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -401,9 +399,23 @@ func streamPage(w http.ResponseWriter, r *http.Request, seedInput int64, app *Ap
             color: #333;
             font-size: 2em;
             text-align: center;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             border-bottom: 2px solid #007cba;
             padding-bottom: 10px;
+        }
+        .last-updated {
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+            font-style: italic;
+            margin-bottom: 20px;
+        }
+        .author {
+            text-align: center;
+            color: #007cba;
+            font-size: 1em;
+            font-weight: bold;
+            margin-bottom: 20px;
         }
         .content {
             font-size: 16px;
@@ -457,11 +469,13 @@ func streamPage(w http.ResponseWriter, r *http.Request, seedInput int64, app *Ap
 		time.Sleep(addJitter(titleDelay))
 	}
 
-	// Send the title closing and content div opening
-	contentStart := `</h1>
+	// Send the title closing and last updated date
+	lastUpdatedText := `</h1>
+        <div class="last-updated">Last updated: ` + story.LastUpdated.Format("January 2, 2006 at 3:04 PM") + `</div>
+        <div class="author">Author: ` + story.Author + `</div>
         <div class="content">`
 
-	w.Write([]byte(contentStart))
+	w.Write([]byte(lastUpdatedText))
 	w.(http.Flusher).Flush()
 
 	// Split content into words and stream them

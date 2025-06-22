@@ -4,40 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 
 	"github.com/mb-14/gomarkov"
 )
-
-const (
-	hnBaseURL        = "https://hacker-news.firebaseio.com/v0/"
-	hnTopStoriesPath = "topstories.json"
-	hnStoryItemPath  = "item/"
-)
-
-type hnStory struct {
-	Title string `json:"title"`
-}
-
-// func main() {
-// 	train := flag.Bool("train", false, "Train the markov chain")
-// 	flag.Parse()
-// 	if *train {
-// 		chain, err := buildModel()
-// 		if err != nil {
-// 			fmt.Println(err)
-// 			return
-// 		}
-// 		saveModel(chain)
-// 	} else {
-// 		chain, err := loadModel()
-// 		if err != nil {
-// 			fmt.Println(err)
-// 			return
-// 		}
-// 		generateHNStory(chain)
-// 	}
-// }
 
 func BuildModel(input string) (*gomarkov.Chain, error) {
 	chain := gomarkov.NewChain(1)
@@ -54,30 +25,38 @@ func BuildModel(input string) (*gomarkov.Chain, error) {
 func AddTextToModel(chain *gomarkov.Chain, input string) error {
 	simple := true
 	if simple {
-		paragraphs := strings.Split(input, "\n\n")
-		for _, paragraph := range paragraphs {
-			worksWithPunctuation := strings.Split(paragraph, " ")
-			chain.Add(worksWithPunctuation)
+		terminatingPunctuation := []string{".", "!", "?"}
+		// now loop over fields, grouping by sentence, meaning gorup until a period is found.
+		words := strings.Fields(input)
+		lastIndex := 0
+		for i := 0; i < len(words); i++ {
+			word := words[i]
+			lastChar := word[len(word)-1:]
+			if slices.Contains(terminatingPunctuation, lastChar) {
+				chain.Add(words[lastIndex : i+1])
+				fmt.Println(strings.Join(words[lastIndex:i+1], " "))
+				lastIndex = i + 1
+			}
+		}
+		if lastIndex < len(words) {
+			chain.Add(words[lastIndex:])
 		}
 	} else {
 		//now extract punctuation and add to the chain separately
 		//also consider quotes and other punctuation that can start a sentence
 		//also consider whitespace as it's own token
 
-		worksWithPunctuation := strings.Split(input, " ")
-		punctuation := []string{".", "!", "?", ","}
-		var tokens []string
-		for _, word := range worksWithPunctuation {
-			for _, punct := range punctuation {
-				if strings.HasSuffix(word, punct) {
-					tokens = append(tokens, strings.TrimSuffix(word, punct), punct)
-				} else {
-					tokens = append(tokens, word)
-				}
-				tokens = append(tokens, " ")
-			}
-		}
-		chain.Add(tokens)
+		// wordsWithPunctuation := strings.Fields(input)
+		// var tokens []string
+		// for _, word := range wordsWithPunctuation {
+		// 	if strings.HasSuffix(word, punct) {
+		// 		tokens = append(tokens, strings.TrimSuffix(word, punct), punct)
+		// 	} else {
+		// 		tokens = append(tokens, word)
+		// 	}
+		// 	tokens = append(tokens, " ")
+		// }
+		// chain.Add(tokens)
 	}
 	return nil
 }

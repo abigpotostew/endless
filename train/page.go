@@ -4,15 +4,18 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/mb-14/gomarkov"
 )
 
 type GeneratedPage struct {
-	Link    PageLink
-	Content string
-	Links   []PageLink
+	Link        PageLink
+	Content     string
+	Links       []PageLink
+	LastUpdated time.Time
+	Author      string
 }
 
 func GeneratePage(seed int64, chain *gomarkov.Chain) (GeneratedPage, error) {
@@ -29,11 +32,15 @@ func GeneratePage(seed int64, chain *gomarkov.Chain) (GeneratedPage, error) {
 	if err != nil {
 		return GeneratedPage{}, err
 	}
+	lastUpdated := generateRandomDate(prng)
+	author := authors[prng.Intn(len(authors))]
 
 	page := GeneratedPage{
-		Link:    thisLink,
-		Content: content,
-		Links:   links,
+		Link:        thisLink,
+		Content:     content,
+		Links:       links,
+		LastUpdated: lastUpdated,
+		Author:      author,
 	}
 	return page, nil
 }
@@ -104,4 +111,30 @@ func createLinks(prng *rand.Rand, chain *gomarkov.Chain) ([]PageLink, error) {
 		links = append(links, link)
 	}
 	return links, nil
+}
+
+// generateRandomDate creates a random date within the last 2 years
+func generateRandomDate(prng *rand.Rand) time.Time {
+	// Generate a random date within the last 2 years
+	now := time.Now()
+	twoYearsAgo := now.AddDate(-2, 0, 0)
+
+	// Generate random seconds since two years ago
+	secondsRange := int64(now.Sub(twoYearsAgo).Seconds())
+	randomSeconds := prng.Int63n(secondsRange)
+
+	// Add random seconds to the base date
+	randomDate := twoYearsAgo.Add(time.Duration(randomSeconds) * time.Second)
+
+	return randomDate
+}
+
+var authors = []string{
+	"Arlo Mills",
+	"Joe Goetz",
+	"Billy Goetz",
+	"Marybeth Trott",
+	"Charlie Davis",
+	"Diana White",
+	"Ethan Young",
 }
