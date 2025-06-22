@@ -347,21 +347,25 @@ func (app *App) homeHandler(w http.ResponseWriter, r *http.Request) {
 func (app *App) getLatestModel() (*store.MarkovChainModel, error) {
 	// Return cached model if available
 	if app.cachedModel != nil {
+		log.Printf("Using cached model ID: %d", app.cachedModel.ID)
 		return app.cachedModel, nil
 	}
 
 	// Get the first available model from the database
 	models, err := app.store.GetAllMarkovChainModels(1)
 	if err != nil {
+		log.Printf("Error retrieving models from database: %v", err)
 		return nil, err
 	}
 
 	if len(models) == 0 {
+		log.Printf("No models found in database - this is likely the cause of 404 errors")
 		return nil, fmt.Errorf("no models found in database")
 	}
 
 	// Cache the first (most recent) model
 	app.cachedModel = &models[0]
+	log.Printf("Retrieved and cached model ID: %d", app.cachedModel.ID)
 	return app.cachedModel, nil
 }
 
@@ -584,9 +588,14 @@ func (app *App) generatePageStreamHandler(w http.ResponseWriter, r *http.Request
 	// it should support parsing int64
 	seed, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
+		log.Printf("Invalid ID in URL %s: %v", r.URL.Path, err)
 		http.Error(w, "Invalid ID: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Add logging for debugging deployment issues
+	log.Printf("Generating page for seed: %d, URL: %s", seed, r.URL.Path)
+
 	streamPage(w, r, seed, app)
 }
 
