@@ -31,6 +31,9 @@ type App struct {
 	cachedModel *store.MarkovChainModel
 }
 
+const statsHtml = `<script data-goatcounter="https://stats.stewart.codes/count"
+        async src="//stats.stewart.codes/count.js"></script>`
+
 func main() {
 	sqliteDbPath := os.Getenv("SQLITE_DB_DIR")
 	if sqliteDbPath == "" {
@@ -291,6 +294,7 @@ func (app *App) homeHandler(w http.ResponseWriter, r *http.Request) {
             }
         }
     </style>
+	` + statsHtml + `
 </head>
 <body>
     <div class="header">
@@ -745,6 +749,7 @@ func streamPage(w http.ResponseWriter, r *http.Request, seedInput int64, app *Ap
         "keywords": "story, fiction, narrative, creative writing, ` + html.EscapeString(story.Author) + `"
     }
     </script>
+	` + statsHtml + `
     
     <!-- Additional SEO Meta Tags -->
     <meta name="theme-color" content="#007cba">
