@@ -2,6 +2,7 @@ package train
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"time"
@@ -47,15 +48,18 @@ func GeneratePage(seed int64, chain *gomarkov.Chain) (GeneratedPage, error) {
 
 func createParagraph(prng *rand.Rand, chain *gomarkov.Chain) (string, error) {
 	sentenceCount := prng.Intn(10) + 1
-	paragraph := ""
+	var paragraph strings.Builder
 	for i := 0; i < sentenceCount; i++ {
 		sentence, err := GenerateStoryFromPrng(prng, chain)
 		if err != nil {
 			return "", err
 		}
-		paragraph += sentence + " "
+		if i > 0 {
+			paragraph.WriteString(" ")
+		}
+		paragraph.WriteString(sentence)
 	}
-	return paragraph, nil
+	return paragraph.String(), nil
 }
 
 func createNewLink(prngOld *rand.Rand, chain *gomarkov.Chain) (PageLink, error) {
@@ -69,9 +73,12 @@ func createLinkFromSeed(seed int64, prng *rand.Rand, chain *gomarkov.Chain) (Pag
 	if err != nil {
 		return PageLink{}, err
 	}
+
 	//make this url friendly.
 	//replace spaces with dashes
-	link := strings.TrimSpace(title)
+	//truncate to max 256 characters
+	numChars := int(math.Min(64, float64(len(title))))
+	link := strings.TrimSpace(title[:numChars])
 	link = strings.ToLower(link)
 	link = strings.ReplaceAll(link, " ", "-")
 	link = strings.ReplaceAll(link, "\n", "-")
@@ -137,4 +144,24 @@ var authors = []string{
 	"Charlie Davis",
 	"Diana White",
 	"Ethan Young",
+}
+
+// GenerateHomePagePosts generates multiple posts for the home page grid
+func GenerateHomePagePosts(chain *gomarkov.Chain, count int) ([]GeneratedPage, error) {
+	// Use current time as base seed for consistent daily generation
+	baseSeed := time.Now().Unix() / 86400 // Daily seed (changes every day)
+
+	posts := make([]GeneratedPage, count)
+	for i := 0; i < count; i++ {
+		// Create a unique seed for each post based on the daily seed
+		postSeed := baseSeed + int64(i*1000) // Ensure unique seeds
+
+		post, err := GeneratePage(postSeed, chain)
+		if err != nil {
+			return nil, err
+		}
+		posts[i] = post
+	}
+
+	return posts, nil
 }
