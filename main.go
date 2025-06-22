@@ -661,17 +661,12 @@ func streamPage(w http.ResponseWriter, r *http.Request, seedInput int64, app *Ap
 	words := strings.Fields(story.Content)
 	wordDelay := 50 * time.Millisecond
 
-	// Calculate link timing - we'll stream each word of each link title
-	totalLinkWords := 0
-	for _, link := range story.Links {
-		totalLinkWords += len(strings.Fields(link.Title))
-	}
 	linkWordDelay := wordDelay
 
 	// Helper function to add jitter to delays
 	addJitter := func(baseDelay time.Duration) time.Duration {
 		// Add ±30% jitter
-		jitterRange := float64(baseDelay) * 0.45
+		jitterRange := float64(baseDelay) * 0.3
 		jitter := (prng.Float64()*2 - 1) * jitterRange // Random value between -0.3 and +0.3
 		return baseDelay + time.Duration(jitter)
 	}
@@ -869,11 +864,11 @@ func streamPage(w http.ResponseWriter, r *http.Request, seedInput int64, app *Ap
 	w.Write([]byte(headerHTML))
 	w.(http.Flusher).Flush()
 
-	// Stream the title character by character
+	// Stream the title character by character with jitter
 	for _, char := range story.Link.Title {
 		w.Write([]byte(html.EscapeString(string(char))))
 		w.(http.Flusher).Flush()
-		time.Sleep(addJitter(wordDelay))
+		time.Sleep(addJitter(wordDelay / 3)) // Faster for individual characters
 	}
 
 	// Send the title closing and metadata
@@ -914,16 +909,11 @@ func streamPage(w http.ResponseWriter, r *http.Request, seedInput int64, app *Ap
                 <li role="listitem"><a href="` + html.EscapeString(link.Url) + `">`))
 		w.(http.Flusher).Flush()
 
-		// Stream the link title word by word
-		linkWords := strings.Fields(link.Title)
-		for i, word := range linkWords {
-			// Add space before word (except for first word)
-			if i > 0 {
-				w.Write([]byte(" "))
-			}
-			w.Write([]byte(html.EscapeString(word)))
+		// Stream the link title character by character
+		for _, char := range link.Title {
+			w.Write([]byte(html.EscapeString(string(char))))
 			w.(http.Flusher).Flush()
-			time.Sleep(addJitter(linkWordDelay))
+			time.Sleep(addJitter(linkWordDelay / 3)) // Faster for individual characters
 		}
 
 		// Close the link and list item
