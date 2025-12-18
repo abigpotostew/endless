@@ -32,7 +32,7 @@ type App struct {
 	cachedModel *store.MarkovChainModel
 }
 
-const statsHtml = `<script src="https://dingdong.stewart.codes/tracker.js" ></script>`
+const statsHtml = `<script src="https://dingdong.stewart.codes/tracker.js" data-endpoint="https://dingdong.stewart.codes"></script>`
 
 func main() {
 	sqliteDbPath := os.Getenv("SQLITE_DB_DIR")
