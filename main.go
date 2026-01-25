@@ -369,7 +369,7 @@ func (app *App) homeHandler(w http.ResponseWriter, r *http.Request) {
     <div class="posts-grid">`
 
 	w.Write([]byte(headerHTML))
-	w.(http.Flusher).Flush()
+	// w.(http.Flusher).Flush()
 
 	// Stream each post card
 	for _, post := range posts {
@@ -387,7 +387,7 @@ func (app *App) homeHandler(w http.ResponseWriter, r *http.Request) {
         </a>`
 
 		w.Write([]byte(postCard))
-		w.(http.Flusher).Flush()
+		// w.(http.Flusher).Flush()
 	}
 
 	// Send the closing HTML
