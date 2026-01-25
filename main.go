@@ -27,6 +27,62 @@ type CreateMarkovModelRequest struct {
 	Model   *store.MarkovChainModel `json:"model,omitempty"`
 }
 
+// TrainAPIAuth holds credentials for train API basic auth
+type TrainAPIAuth struct {
+	Username string
+	Password string
+}
+
+// getTrainAPIAuth returns the configured basic auth credentials for train APIs
+func getTrainAPIAuth() *TrainAPIAuth {
+	username := os.Getenv("TRAIN_API_USERNAME")
+	password := os.Getenv("TRAIN_API_PASSWORD")
+	if username == "" || password == "" {
+		return nil
+	}
+	return &TrainAPIAuth{Username: username, Password: password}
+}
+
+// isLocalhost checks if the request is coming from localhost
+func isLocalhost(r *http.Request) bool {
+	host := r.Host
+	// Strip port if present
+	if colonIdx := strings.LastIndex(host, ":"); colonIdx != -1 {
+		host = host[:colonIdx]
+	}
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// trainAPIAuthMiddleware wraps a handler to require either localhost or valid basic auth.
+// Returns 404 on auth failure to hide the API's existence from malicious users.
+func trainAPIAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Allow localhost requests without auth
+		if isLocalhost(r) {
+			next(w, r)
+			return
+		}
+
+		// For non-localhost, require basic auth
+		auth := getTrainAPIAuth()
+		if auth == nil {
+			log.Println("No auth configured, only localhost allowed - returning 404")
+			// No auth configured, only localhost allowed - return 404 to hide API
+			http.NotFound(w, r)
+			return
+		}
+
+		username, password, ok := r.BasicAuth()
+		if !ok || username != auth.Username || password != auth.Password {
+			// Auth failed - return 404 to hide the API's existence
+			http.NotFound(w, r)
+			return
+		}
+
+		next(w, r)
+	}
+}
+
 type App struct {
 	store       store.PostStore
 	cachedModel *store.MarkovChainModel
@@ -68,8 +124,9 @@ func main() {
 	r.HandleFunc("/post/{id}", app.generatePageStreamHandler).Methods("GET")
 	// need to restrict these to only allow requests from localhost
 	r.HandleFunc("/health", app.healthHandler).Methods("GET").Host("localhost")
-	r.HandleFunc("/api/train", app.trainMarkovModelHandler).Methods("POST").Host("localhost")
-	r.HandleFunc("/api/train/{id}", app.updateMarkovModelHandler).Methods("PUT").Host("localhost")
+
+	r.HandleFunc("/api/train", trainAPIAuthMiddleware(app.trainMarkovModelHandler)).Methods("POST")
+	r.HandleFunc("/api/train/{id}", trainAPIAuthMiddleware(app.updateMarkovModelHandler)).Methods("PUT")
 
 	// Start server
 	//accept port from env
