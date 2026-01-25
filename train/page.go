@@ -163,3 +163,58 @@ func GenerateHomePagePosts(chain MarkovChain, count int) ([]GeneratedPage, error
 
 	return posts, nil
 }
+
+// AuthorNameToSlug converts an author name to a URL-friendly slug
+func AuthorNameToSlug(name string) string {
+	slug := strings.ToLower(name)
+	slug = strings.ReplaceAll(slug, " ", "-")
+	// Remove any non-alphanumeric characters except dashes
+	slug = strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || r == '-' {
+			return r
+		}
+		return -1
+	}, slug)
+	// Remove duplicate dashes
+	slug = strings.ReplaceAll(slug, "--", "-")
+	// Trim leading/trailing dashes
+	slug = strings.Trim(slug, "-")
+	return slug
+}
+
+// GetAuthorBySlug returns the author name that matches the given slug
+func GetAuthorBySlug(slug string) (string, bool) {
+	for _, author := range authors {
+		if AuthorNameToSlug(author) == slug {
+			return author, true
+		}
+	}
+	return "", false
+}
+
+// GenerateAuthorPagePosts generates posts for an author page
+// It keeps generating until it has the desired count of posts by the target author
+func GenerateAuthorPagePosts(chain MarkovChain, authorName string, count int) ([]GeneratedPage, error) {
+	// Use current time as base seed for consistent daily generation
+	baseSeed := time.Now().Unix() / 86400 // Daily seed (changes every day)
+
+	posts := make([]GeneratedPage, 0, count)
+	maxAttempts := count * 100 // Prevent infinite loops
+
+	for i := 0; len(posts) < count && i < maxAttempts; i++ {
+		// Create a unique seed for each post based on the daily seed
+		postSeed := baseSeed + int64(i*1000) // Ensure unique seeds
+
+		post, err := GeneratePage(postSeed, chain)
+		if err != nil {
+			return nil, err
+		}
+
+		// Only include posts by the target author
+		if post.Author == authorName {
+			posts = append(posts, post)
+		}
+	}
+
+	return posts, nil
+}
