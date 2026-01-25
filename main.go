@@ -388,9 +388,6 @@ func (app *App) homeHandler(w http.ResponseWriter, r *http.Request) {
 
 		w.Write([]byte(postCard))
 		w.(http.Flusher).Flush()
-
-		// Add a small delay for streaming effect
-		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Send the closing HTML
