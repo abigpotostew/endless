@@ -58,6 +58,10 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		// Call the next handler
 		next.ServeHTTP(wrapped, r)
 
+		if r.URL.Path == "/health" {
+			return
+		}
+
 		// Calculate duration
 		duration := time.Since(start)
 
